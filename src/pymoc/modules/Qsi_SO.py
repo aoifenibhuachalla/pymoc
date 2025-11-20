@@ -5,7 +5,7 @@ from scipy import integrate, optimize
 from pymoc.utils import make_func
 
 
-class Psi_SO(object):
+class Qsi_SO(object):
   r"""
   Southern Ocean Overturning Transport Model
 
@@ -13,20 +13,13 @@ class Psi_SO(object):
   the Southern Ocean interior, calculated based on a density profile in the
   adjoining basin, and local surface buoyancy and surface wind stress in the SO.
 
-    ! Not changed for passive tracer propagation !
-
-
   """
   def __init__(
       self,
       z=None,    # vertical grid (array, in)
       y=None,    # horizontal grid (array, in)  
-      b=None,    # buoyancy profile at northern end of ACC (function, array or float, in)
-      bs=None,    # surface buoyancy (function, array or float, in)
-
-      tracer = None,
-      ts = None, 
-      
+      q=None,    # buoyancy profile at northern end of ACC (function, array or float, in)
+      qs=None,    # surface buoyancy (function, array or float, in)
       tau=None,    # surface wind stress (function, array or float, in)  
       f=1.2e-4,    # Coriolis parameter (in)
       rho=1030,    # Density of sea water (in)
@@ -95,8 +88,8 @@ class Psi_SO(object):
           'y needs to be numpy array providing horizontal grid (or boundaries) of ACC'
       )
 
-    self.b = make_func(b, self.z, 'b')
-    self.bs = make_func(bs, self.y, 'bs')
+    self.q = make_func(q, self.z, 'q')
+    self.qs = make_func(qs, self.y, 'qs')
     self.tau = make_func(tau, self.y, 'tau')
     self.f = f
     self.rho = rho
@@ -110,7 +103,7 @@ class Psi_SO(object):
     self.Htaperbot = Htaperbot
     self.smax = smax
 
-  def ys(self, b):
+  def ys(self, q):
     r"""
     Inversion function of :math:`bs\left(y\right)`. This is equivalent to the outcopping
     latitude of the isopycnal of density class :math:`b`.
@@ -130,12 +123,12 @@ class Psi_SO(object):
 
     """
     def func(y):
-      return self.bs(y) - b
+      return self.qs(y) - q
 
-    if b < np.min(self.bs(self.y)):
+    if q < np.min(self.qs(self.y)):
       # if b is smaller minimum bs, isopycnals don't outcrop and get handled separately
       return self.y[0] - 1e3
-    if b > self.bs(self.y[-1]):
+    if q > self.qs(self.y[-1]):
       # if b is larger than bs at northern end, return northernmost point:
       return self.y[-1]
     else:
@@ -143,7 +136,7 @@ class Psi_SO(object):
       # Notice that this inversion is well defined only if bs is monotonically
       # increasing (past minind). Should probably add a check to make sure
       # this is the case...
-      minind = np.argmin(self.bs(self.y))
+      minind = np.argmin(self.qs(self.y))
       return optimize.brentq(func, self.y[minind], self.y[-1])
 
   def calc_N2(self):
@@ -160,11 +153,11 @@ class Psi_SO(object):
 
     dz = self.z[1:] - self.z[:-1]
     N2 = np.zeros(np.size(self.z))
-    b = self.b(self.z)
+    q = self.q(self.z)
 
-    N2[1:-1] = (b[2:] - b[:-2]) / (dz[1:] + dz[:-1])
-    N2[0] = (b[1] - b[0]) / dz[0]
-    N2[-1] = (b[-1] - b[-2]) / dz[-1]
+    N2[1:-1] = (q[2:] - q[:-2]) / (dz[1:] + dz[:-1])
+    N2[0] = (q[1] - q[0]) / dz[0]
+    N2[-1] = (q[-1] - q[-2]) / dz[-1]
 
     return make_func(N2, self.z, 'N2')
 
@@ -242,7 +235,7 @@ class Psi_SO(object):
 
     tau_ave = 0 * self.z
     for ii in range(0, np.size(self.z)):
-      y0 = self.ys(self.b(self.z[ii]))    # outcrop latitude
+      y0 = self.ys(self.q(self.z[ii]))    # outcrop latitude
       tau_ave[ii] = np.mean(self.tau(np.linspace(y0, self.y[-1], 100)))
 
     silltaper = self.calc_bottom_taper(self.Hsill, self.z)
@@ -309,7 +302,7 @@ class Psi_SO(object):
     dy_atz = 0 * self.z
     eps = 0.1    # minimum dy (in meters) (to avoid div. by 0)
     for ii in range(0, np.size(self.z)):
-      dy_atz[ii] = max(self.y[-1] - self.ys(self.b(self.z[ii])), eps)
+      dy_atz[ii] = max(self.y[-1] - self.ys(self.q(self.z[ii])), eps)
     bottaper = self.calc_bottom_taper(self.Htaperbot, self.z)
     toptaper = self.calc_top_taper(self.Htapertop, self.z)
     if self.c is not None:
@@ -360,7 +353,7 @@ class Psi_SO(object):
     # and only used foir plotting purposes, for which it makes sense to simply set it to zero:
     self.Psi[0] = 0.
 
-  def update(self, b=None, bs=None):
+  def update(self, q=None, qs=None):
     r"""
     Update the vertical buoyancy profile and surface buoyancy, based on changes
     in the adjoining basin and/or in the surface boundary conditions.
@@ -376,28 +369,7 @@ class Psi_SO(object):
          or an array or function in y. Units: m/s\ :sup:`2`
     """
 
-    if b is not None:
-      self.b = make_func(b, self.z, 'b')
-    if bs is not None:
-      self.bs = make_func(bs, self.y, 'bs')
-
-  def update_tracer(self, tracer=None, ts=None):
-    r"""
-    Update the vertical tracer profile and tracer buoyancy, based on changes
-    in the adjoining basin and/or in the surface boundary conditions.
-
-    Parameters
-    ----------
-
-    b : float, function, or ndarray
-        Vertical buoyancy profile from the adjoining basin, on the north
-        side of the ACC. Units: m/s\ :sup:`2`
-    bs : float, function, or ndarray
-         Surface level buoyancy boundary condition. Can be a constant,
-         or an array or function in y. Units: m/s\ :sup:`2`
-    """
-
-    if tracer is not None:
-      self.tracer = make_func(tracer, self.z, 'tracer')
-    if ts is not None:
-      self.ts = make_func(ts, self.y, 'ts')
+    if q is not None:
+      self.q = make_func(q, self.z, 'q')
+    if qs is not None:
+      self.qs = make_func(qs, self.y, 'qs')

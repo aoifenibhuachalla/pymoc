@@ -60,3 +60,38 @@ class Interpolate_channel(object):
 
   def gridit(self):
     return gridit(self.y, self.z, self)
+
+
+  def set_tracer(self, ts=None, tn=None):
+      self.ts = ts
+      self.tn = tn
+      self.have_tracer = True  
+  def tracer_at(self, y, z):
+      if not self.have_tracer:
+          raise RuntimeError('Tracer functions not set')  
+      l = self.y[-1]
+      if y == l:
+          return self.tn(z)
+      else:
+          def f2(x):
+              return self.bn(x) - self.bs(0)  
+          def f(x):
+              return self.bn(z - x * (l - y)) - self.bs(y + z / x)  
+          sbot = -brenth(f2, self.z[0], 0.) / l
+          if -z > sbot * y:
+              s = sbot
+          else:
+              s = brenth(f, 1.e-12, 1.0)
+          zz = z - s * (l - y)  
+          w = (y - self.y[0]) / (self.y[-1] - self.y[0])
+          return (1.0 - w) * self.ts(zz) + w * self.tn(zz)  
+  def tracer_grid(self):
+      if not self.have_tracer:
+          raise RuntimeError('Tracer functions not set')
+      ny = len(self.y)
+      nz = len(self.z)
+      out = np.zeros((ny, nz))
+      for i in range(ny):
+          for k in range(nz):
+              out[i, k] = self.tracer_at(self.y[i], self.z[k])
+      return out  
