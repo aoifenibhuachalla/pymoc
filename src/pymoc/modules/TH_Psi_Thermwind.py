@@ -9,10 +9,9 @@ class TH_Psi_Thermwind(object):
   Thermal Wind Closure for Thermohaline Columns
 
   Instances of this class represent the overturning circulation between two
-  vertical columns, given **buoyancy** profiles in those columns. The buoyancy
-  profiles are typically diagnosed from temperature and salinity via a linear
-  equation of state in a :class:`ThermohalineColumn`, but can also be provided
-  directly.
+  vertical columns, given buoyancy  profiles in those columns. The buoyancy
+  profiles are diagnosed from temperature and salinity via the linear
+  equation of state.    
 
   The model assumes a thermal-wind based equation for the overturning
   circulation as in Nikurashin and Vallis (2012):
@@ -87,42 +86,35 @@ class TH_Psi_Thermwind(object):
 
     nz = np.size(self.z)
 
-    # Initialize buoyancy fields, possibly from columns:
-    # b1: southern basin
+
     if b1 is not None:
       self.b1 = make_func(b1, self.z, 'b1')
     elif (col1 is not None) and hasattr(col1, 'b'):
       self.b1 = make_func(col1.b, self.z, 'b1')
     else:
-      # default: zero buoyancy profile
       self.b1 = make_func(0.0, self.z, 'b1')
 
-    # b2: northern region
     if b2 is not None:
       self.b2 = make_func(b2, self.z, 'b2')
     elif (col2 is not None) and hasattr(col2, 'b'):
       self.b2 = make_func(col2.b, self.z, 'b2')
     else:
-      # default: zero buoyancy profile
-      self.b2 = make_func(0.0, self.z, 'b2')
+      
+      self.b2 = make_func(0.0, self.z, 'b2') # default zero buoyancy profile
 
-    # Store column references (optional, for later update convenience)
     self.col1 = col1
     self.col2 = col2
 
-    # Set initial conditions for BVP solver
+    #  initial conditions for BVP solver
     if sol_init is None:
       self.sol_init = np.zeros((2, nz))
     else:
       self.sol_init = sol_init
 
-    # Placeholder for streamfunction in depth space
+    # Placeholder for streamfunction in depth space -> fill with zeros 
     self.Psi = np.zeros_like(self.z)
 
-  # --------------------------------------------------------------------------
-  #  Boundary conditions for BVP
-  # --------------------------------------------------------------------------
-  def bc(self, ya, yb):
+  def bc(self, ya, yb):   # don't need to change ?
     r"""
     Calculate the residuals of boundary conditions for the thermal wind closure
     boundary value problem.
@@ -145,9 +137,7 @@ class TH_Psi_Thermwind(object):
 
     return np.array([ya[0], yb[0]])
 
-  # --------------------------------------------------------------------------
-  #  ODE system for BVP
-  # --------------------------------------------------------------------------
+
   def ode(self, z, y):
     r"""
     Generate the ordinary differential equation for the thermal wind overturning
@@ -180,9 +170,7 @@ class TH_Psi_Thermwind(object):
     """
     return np.vstack((y[1], 1.0 / self.f * (self.b2(z) - self.b1(z))))
 
-  # --------------------------------------------------------------------------
-  #  Solve thermal-wind BVP
-  # --------------------------------------------------------------------------
+
   def solve(self):
     r"""
     Solve for the thermal wind overturning streamfunction as a boundary value
@@ -193,17 +181,19 @@ class TH_Psi_Thermwind(object):
     Sverdrups.
     """
 
-    # Note: The solution to this BVP is a relatively straightforward integral;
-    # it would probably be faster to just code it up that way. We use solve_bvp
-    # for consistency with the original implementation.
+
     res = integrate.solve_bvp(self.ode, self.bc, self.z, self.sol_init)
-    # interpolate solution for overturning circulation onto original grid
-    # and change units to Sv:
+    #  change units to Sv:
     self.Psi = res.sol(self.z)[0, :] / 1e6
 
-  # --------------------------------------------------------------------------
-  #  Isopycnal mapping of overturning
-  # --------------------------------------------------------------------------
+
+
+    ## so far don't need to map to some kind of temp/salinity space, 
+    #  since temp and salinity (in column) are updating into buoyancy via the EOS 
+
+
+                                                                                        # an bhfuil tú cinnte faoi seo? 
+                                                                                          # mínigh sa chéad crinniú eile, nó cur ceist ar Nelson b'fhéidir 
   def Psib(self, nb=500):
     r"""
     Remap the overturning streamfunction from physical depth space into
@@ -247,8 +237,7 @@ class TH_Psi_Thermwind(object):
     bmax = max(np.max(b1), np.max(b2))
     self.bgrid = np.linspace(bmin, bmax, nb)
 
-    # udydz = -dPsi/dz (note the sign convention vs. original code)
-    udydz = -(self.Psi[1:] - self.Psi[:-1])
+    udydz = -(self.Psi[1:] - self.Psi[:-1])   ## minus sighs here ?        !! check ¡¡
     psib = 0.0 * self.bgrid
 
     # upstream buoyancy at bottom/top of each layer
@@ -265,9 +254,6 @@ class TH_Psi_Thermwind(object):
 
     return psib
 
-  # --------------------------------------------------------------------------
-  #  Isopycnal-depth mapping back to columns
-  # --------------------------------------------------------------------------
   def Psibz(self, nb=500):
     r"""
     Remap the overturning streamfunction onto the native isopycnal-depth space
@@ -290,21 +276,13 @@ class TH_Psi_Thermwind(object):
     # Map isopycnal overturning into isopycnal space:
     psib = self.Psib(nb)
 
-    # This does a linear interpolation in b:
+    # linear interpolation in b-space:
     return [
         np.interp(self.b1(self.z), self.bgrid, psib),
         np.interp(self.b2(self.z), self.bgrid, psib)
     ]
 
-    # Alternative approach (commented out), interpolating in depth:
-    # z1_of_bgrid = np.interp(self.bgrid, self.b1(self.z), self.z)
-    # z2_of_bgrid = np.interp(self.bgrid, self.b2(self.z), self.z)
-    # return [np.interp(self.z, z1_of_bgrid, psib),
-    #         np.interp(self.z, z2_of_bgrid, psib)]
 
-  # --------------------------------------------------------------------------
-  #  Update buoyancy profiles
-  # --------------------------------------------------------------------------
   def update(self, col1=None, col2=None, b1=None, b2=None):
     r"""
     Update the vertical buoyancy profiles from the southern basin and northern
@@ -324,13 +302,11 @@ class TH_Psi_Thermwind(object):
     b2 : float, function, or ndarray, optional
         Vertical buoyancy profile from the northern basin. Units: m/s^2
     """
-    # Update stored column references if provided
     if col1 is not None:
       self.col1 = col1
     if col2 is not None:
       self.col2 = col2
 
-    # Update buoyancy profiles
     if b1 is not None:
       self.b1 = make_func(b1, self.z, 'b1')
     elif (self.col1 is not None) and hasattr(self.col1, 'b'):

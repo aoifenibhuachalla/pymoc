@@ -4,10 +4,13 @@ from pymoc.utils import make_func, make_array, check_numpy_version
 
 
 class ThermohalineColumn(object):
-  r"""
+  # state variables: T(z) and S(z) -> diagnose buoyancy via linear EOS
+  # -> propagate though advection, diffusion, convection etc. 
+  #    -> update to new T(z), S(z) 
+    r"""
   Vertical Advection-Diffusion Column Model with Temperature, Salinity and Buoyancy
 
-  This class is a thermohaline extension of the original buoyancy-only ``Column`` model.
+  This class is a extension of the original buoyancy-only Column module.
   It represents a 1D water column where temperature and salinity are prognostic tracers,
   and buoyancy is diagnosed via a linear equation of state:
 
@@ -24,7 +27,7 @@ class ThermohalineColumn(object):
   Boundary conditions:
 
   * Fixed temperature and salinity at the surface (``Ts``, ``Ss``) if no restoring is used.
-  * Optional Stommel-style surface restoring for T and S with exchange coefficients
+  * Can add Stommel-style surface restoring for T and S with exchange coefficients
     ``lambda_T`` and ``lambda_S``; if these are not None, the surface values are no
     longer clamped but are relaxed toward ``Ts`` and ``Ss`` during timestepping.
   * Fixed T/S or fixed dT/dz, dS/dz at the bottom.
@@ -98,7 +101,6 @@ class ThermohalineColumn(object):
       T0=0.0,
       S0=35.0
   ):
-    # initialize grid
     if isinstance(z, np.ndarray) and len(z) > 0:
       self.z = z
     else:
@@ -107,7 +109,7 @@ class ThermohalineColumn(object):
     self.kappa = make_func(kappa, self.z, 'kappa')
     self.Area = make_func(Area, self.z, 'Area')
 
-    # EOS parameters
+    # add EOS parameters
     self.g = g
     self.alpha = alpha
     self.beta = beta
@@ -124,16 +126,15 @@ class ThermohalineColumn(object):
     self.Sbot = Sbot
     self.Szbot = Szbot
 
-    # Stommel-style restoring coefficients; if None, revert to hard Dirichlet at surface
-    self.lambda_T = lambda_T
+    self.lambda_T = lambda_T     # restoring coefficients; if None, revert to hard Dirichlet at surface
+
     self.lambda_S = lambda_S
 
     # Minimum stratification (in buoyancy units) for convective adjustment
     self.N2min = N2min
 
-    # Prognostic tracers: T and S
-    self.T = make_array(T, self.z, 'T')
-    self.S = make_array(S, self.z, 'S')
+    self.T = make_array(T, self.z, 'T') ## temperature 
+    self.S = make_array(S, self.z, 'S') ## saliniy 
 
     if check_numpy_version():
       self.Tz = np.gradient(self.T, self.z)
@@ -142,7 +143,7 @@ class ThermohalineColumn(object):
       self.Tz = 0. * self.z
       self.Sz = 0. * self.z
 
-    # Diagnose buoyancy and its vertical gradient
+    # Diagnose buoyancy and its vertical gradient from the specified and updated temperature and salinity 
     self.update_b()
 
   def update_b(self):
@@ -163,14 +164,14 @@ class ThermohalineColumn(object):
     # define a surface buoyancy bs for use in convection (from Ts, Ss)
     self.bs = self.g * (self.alpha * (self.Ts - self.T0) - self.beta * (self.Ss - self.S0))
 
-  def Akappa(self, z):
+  def Akappa(self, z):   # same 
     r"""
     Compute the area integrated diffusivity :math:`A\kappa`
     at depth(s) z.
     """
     return self.Area(z) * self.kappa(z)
 
-  def dAkappa_dz(self, z):
+  def dAkappa_dz(self, z): ## same 
     r"""
     Compute the area integrated diffusivity gradient
     :math:`\partial_z\left(A\kappa\right)` at depth(s) z.
@@ -185,11 +186,13 @@ class ThermohalineColumn(object):
     r"""
     Boundary conditions for the equilibrium advective-diffusive problem in T and S.
 
-    State vector y = (T, dT/dz, S, dS/dz).
+    State vector y = (T, dT/dz, S, dS/dz). 
 
-    At present, the equilibrium solver still uses Dirichlet surface conditions
+    (Equilibrium solver still uses Dirichlet surface conditions
     T(z=surface) = Ts and S(z=surface) = Ss, even if restoring is enabled
-    in the time-stepping model.
+    in the time-stepping model)
+    
+    (haven't tun into issues with this yet)
     """
     # Temperature BC at bottom
     if self.Tzbot is None:
@@ -258,6 +261,8 @@ class ThermohalineColumn(object):
 
     self.update_b()
 
+
+    ## update vertical adv-diff, convection, and horizontal adv-diff into buoyancy 
   def vertadvdiff(self, wA, dt, do_conv=False):
     r"""
     Vertical advection and diffusion for T and S in the time-stepping solution.
@@ -269,7 +274,7 @@ class ThermohalineColumn(object):
     wA = make_array(wA, self.z, 'wA')
     dz = self.z[1:] - self.z[:-1]
 
-    def _advdiff_tracer(q, q_surface, q_bottom, qz_bottom=None, enforce_surface_value=True):
+    def _advdiff_tracer(q, q_surface, q_bottom, qz_bottom=None, enforce_surface_value=True):   # from tracer code 
       q = q.copy()
 
       # apply boundary conditions
@@ -277,19 +282,18 @@ class ThermohalineColumn(object):
       if enforce_surface_value and not do_conv:
         q[-1] = q_surface
 
-      # bottom BC: either fixed value or fixed gradient
-      if qz_bottom is None:
+      # bottom BC
+      if qz_bottom is None:    # either fixed value or fixed gradient
         q[0] = q_bottom
       else:
         q[0] = q[1] - qz_bottom * dz[0]
 
-      # vertical gradient
       qz = (q[1:] - q[:-1]) / dz
       qz_up = qz[1:]
       qz_down = qz[:-1]
       qzz = (qz_up - qz_down) / (0.5 * (dz[1:] + dz[:-1]))
 
-      # upwind advection
+      # upwind advection (vert) 
       weff = wA - self.dAkappa_dz(self.z)
       qz_adv = qz_down.copy()
       qz_adv[weff[1:-1] < 0] = qz_up[weff[1:-1] < 0]
@@ -366,18 +370,19 @@ class ThermohalineColumn(object):
     r"""
     Horizontal advection of T and S into the column for the time-stepping solution.
     """
-    vdx_in = make_array(vdx_in, self.z, 'vdx_in')
+    vdx_in = make_array(vdx_in, self.z, 'vdx_in')    ## build/specify all in notebook 
     T_in = make_array(T_in, self.z, 'T_in')
     S_in = make_array(S_in, self.z, 'S_in')
 
-    adv_idx = vdx_in > 0.0
+    adv_idx = vdx_in > 0.0     #upwind, need this line
 
     dT = T_in - self.T
     self.T[adv_idx] = (
         self.T[adv_idx] +
         dt * vdx_in[adv_idx] * dT[adv_idx] / self.Area(self.z[adv_idx])
     )
-
+# treat the same 
+# 
     dS = S_in - self.S
     self.S[adv_idx] = (
         self.S[adv_idx] +

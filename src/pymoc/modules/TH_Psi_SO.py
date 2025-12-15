@@ -88,13 +88,11 @@ class TH_Psi_SO(object):
       smax=0.01,          # max slope for clipping of GM streamfunction
   ):
 
-    # initialize vertical grid:
     if isinstance(z, np.ndarray):
       self.z = z
     else:
       raise TypeError('z needs to be numpy array providing grid levels')
 
-    # initialize meridional grid:
     if isinstance(y, np.ndarray):
       self.y = y
     else:
@@ -102,14 +100,13 @@ class TH_Psi_SO(object):
           'y needs to be numpy array providing horizontal grid (or boundaries) of ACC'
       )
 
-    # store column reference (if provided)
     self.col_basin = col_basin
 
-    # basin buoyancy profile b(z): can come from explicit b or from col_basin.b
+            # basin buoyancy profile b(z) can come from explicit b or from col_basin.b
     if b is not None:
       self.b = make_func(b, self.z, 'b')
     elif (self.col_basin is not None) and hasattr(self.col_basin, 'b'):
-      # if column grid differs from SO grid, interpolate
+      # if column grid is  diff from SO grid, interpolate
       zb = np.asarray(self.col_basin.z)
       bb = np.asarray(self.col_basin.b)
 
@@ -120,7 +117,7 @@ class TH_Psi_SO(object):
           return np.interp(zz, zb_, bb_)
       self.b = make_func(b_arg, self.z, 'b')
     else:
-      # default: zero buoyancy profile
+      # default zero buoyancy profile
       self.b = make_func(0.0, self.z, 'b')
 
     # surface buoyancy and wind stress
@@ -140,14 +137,11 @@ class TH_Psi_SO(object):
     self.Htaperbot = Htaperbot
     self.smax = smax
 
-    # placeholders for overturning components
     self.Psi_Ek = None
     self.Psi_GM = None
     self.Psi = None
 
-  # --------------------------------------------------------------------------
-  #  Inversion bs(y) -> y_s(b)
-  # --------------------------------------------------------------------------
+
   def ys(self, b):
     r"""
     Inversion function of :math:`bs(y)`. This gives the outcropping latitude of
@@ -176,14 +170,12 @@ class TH_Psi_SO(object):
       return self.y[-1]
     else:
       # if b in range of bs return ys(b):
-      # Notice that this inversion is well defined only if bs is monotonically
+      #  well defined only if bs is monotonically
       # increasing (past minind).
       minind = np.argmin(self.bs(self.y))
       return optimize.brentq(func, self.y[minind], self.y[-1])
 
-  # --------------------------------------------------------------------------
-  #  Buoyancy frequency N^2
-  # --------------------------------------------------------------------------
+
   def calc_N2(self):
     r"""
     Calculate the buoyancy (Brunt-Väisälä) frequency profile for the Southern Ocean
@@ -205,9 +197,6 @@ class TH_Psi_SO(object):
 
     return make_func(N2, self.z, 'N2')
 
-  # --------------------------------------------------------------------------
-  #  Bottom tapering
-  # --------------------------------------------------------------------------
   def calc_bottom_taper(self, H, z):
     r"""
     Calculate the quadratic tapering profile relative to the ocean floor.
@@ -230,9 +219,7 @@ class TH_Psi_SO(object):
       return 1. - np.maximum(z[0] + H - z, 0.)**2. / H**2.
     return 1.
 
-  # --------------------------------------------------------------------------
-  #  Top tapering
-  # --------------------------------------------------------------------------
+
   def calc_top_taper(self, H, z, scalar=True):
     r"""
     Calculate the quadratic tapering profile relative to the ocean surface.
@@ -262,9 +249,7 @@ class TH_Psi_SO(object):
       taper[-1] = 0.
       return taper
 
-  # --------------------------------------------------------------------------
-  #  Ekman transport
-  # --------------------------------------------------------------------------
+
   def calc_Ekman(self):
     r"""
     Compute the Ekman transport from the wind stress averaged from the
@@ -290,9 +275,7 @@ class TH_Psi_SO(object):
     Ektaper = self.calc_top_taper(self.HEk, self.z, scalar=False)
     return tau_ave / self.f / self.rho * self.L * silltaper * Ektaper
 
-  # --------------------------------------------------------------------------
-  #  GM BVP boundary conditions
-  # --------------------------------------------------------------------------
+
   def bc_GM(self, ya, yb):
     r"""
     Calculate the residuals of boundary conditions for the eddy-driven transport
@@ -322,9 +305,7 @@ class TH_Psi_SO(object):
     else:
       return np.array([ya[0], yb[0]])
 
-  # --------------------------------------------------------------------------
-  #  GM eddy transport
-  # --------------------------------------------------------------------------
+ 
   def calc_GM(self):
     r"""
     Compute the eddy (Gent & McWilliams) transport based on the meridionally
@@ -366,11 +347,10 @@ class TH_Psi_SO(object):
       def ode(z, y):
         return np.vstack((y[1], N2(z) / self.c**2. * (y[0] - temp(z))))
 
-      # Solve the boundary value problem
       res = integrate.solve_bvp(
           ode, self.bc_GM, self.z, np.zeros((2, np.size(self.z)))
       )
-      # return solution interpolated onto original grid
+      # return solution needs to be interpolated onto original grid
       temp = res.sol(self.z)[0, :]
     else:
       temp = self.KGM * np.maximum(
@@ -382,9 +362,7 @@ class TH_Psi_SO(object):
     temp[idx] = np.maximum(temp[idx], -self.Psi_Ek[idx] * 1e6)
     return temp
 
-  # --------------------------------------------------------------------------
-  #  Solve residual SO overturning
-  # --------------------------------------------------------------------------
+
   def solve(self):
     r"""
     Compute the residual overturning transport in the Southern Ocean.
@@ -402,14 +380,12 @@ class TH_Psi_SO(object):
     self.Psi_Ek = self.calc_Ekman() / 1e6
     self.Psi_GM = self.calc_GM() / 1e6
     self.Psi = self.Psi_Ek + self.Psi_GM
-    # Notice that the Psi at the bottom boundary is somewhat poorly defined,
-    # and only used for plotting purposes, for which it makes sense to
-    # simply set it to zero:
+    # Psi at the bottom boundary -> poorly defined,
+    # but only used for plotting 
+    # --->   set it to zero:
     self.Psi[0] = 0.
 
-  # --------------------------------------------------------------------------
-  #  Update buoyancy and surface buoyancy
-  # --------------------------------------------------------------------------
+
   def update(self, col_basin=None, b=None, bs=None):
     r"""
     Update the vertical buoyancy profile and surface buoyancy, based on changes
